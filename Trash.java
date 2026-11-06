@@ -1,6 +1,7 @@
 package app.nettoyage;
 
 import android.content.Context;
+import android.os.Environment;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -12,6 +13,11 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -119,6 +125,50 @@ class Trash {
         one.add(name + "\t" + clean(f.getAbsolutePath()) + "\t" + size + "\t" + System.currentTimeMillis());
         writeLines(index, one, true);
         return true;
+    }
+
+    /** Copie le fichier dans la corbeille sans le déplacer (utilisé avant compression). */
+    synchronized boolean copyIn(File f) {
+        if (!f.exists()) return false;
+        String name = System.currentTimeMillis() + "_" + (seq++) + "_" + clean(f.getName());
+        File dest = new File(dir, name);
+        long size = f.length();
+        if (!copy(f, dest)) return false;
+        ArrayList<String> one = new ArrayList<>();
+        one.add(name + "\t" + clean(f.getAbsolutePath()) + "\t" + size + "\t" + System.currentTimeMillis());
+        writeLines(index, one, true);
+        return true;
+    }
+
+    /** Crée une archive ZIP des fichiers donnés dans Téléchargements/Nettoyage-sauvegardes. */
+    static File backupZip(List<String> paths) {
+        File out = null;
+        try {
+            File d = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), Scan.BACKUP_DIR_NAME);
+            if (!d.isDirectory() && !d.mkdirs()) return null;
+            out = new File(d, "sauvegarde_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".zip");
+            String root = Environment.getExternalStorageDirectory().getAbsolutePath() + "/";
+            try (ZipOutputStream z = new ZipOutputStream(new FileOutputStream(out))) {
+                byte[] buf = new byte[65536];
+                for (String p : paths) {
+                    File f = new File(p);
+                    if (!f.isFile()) continue;
+                    String name = p.startsWith(root) ? p.substring(root.length()) : p.substring(1);
+                    ZipEntry e = new ZipEntry(name);
+                    e.setTime(f.lastModified());
+                    z.putNextEntry(e);
+                    try (InputStream in = new FileInputStream(f)) {
+                        int n;
+                        while ((n = in.read(buf)) > 0) z.write(buf, 0, n);
+                    }
+                    z.closeEntry();
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            if (out != null) out.delete();
+            return null;
+        }
     }
 
     synchronized boolean restore(Entry e) {

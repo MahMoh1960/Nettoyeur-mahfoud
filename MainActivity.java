@@ -5,6 +5,10 @@ import android.app.AlertDialog;
 import android.app.AppOpsManager;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
+import android.content.ClipData;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -15,6 +19,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.media.MediaScannerConnection;
 import android.media.ThumbnailUtils;
 import android.net.Uri;
 import android.os.Build;
@@ -43,6 +48,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -55,6 +61,9 @@ import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Set;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -78,6 +87,13 @@ public class MainActivity extends Activity {
     final LruCache<String, Bitmap> thumbs = new LruCache<>(80);
     final ArrayDeque<Runnable> back = new ArrayDeque<>();
     Runnable cur;
+    final String ROOT = Environment.getExternalStorageDirectory().getAbsolutePath();
+    int largeCat = -1;
+    long largeMin = Scan.LARGE;
+    String pickPath, foldPath;
+    boolean pendingScan;
+    final Runnable pickRun = this::picker;
+    final Runnable foldRun = this::folders;
     boolean locked, scanning, working, needRefresh;
     long lastStop, blockUntil;
     int fails;
@@ -91,8 +107,8 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         st = new Store(this);
         trash = new Trash(this);
-        String l = st.lang();
-        Tr.ar = l != null ? l.equals("ar") : Locale.getDefault().getLanguage().equals("ar");
+        st.applyLang();
+        Scan.EXCL = st.excluded();
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         if (st.hasPin()) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
@@ -106,6 +122,23 @@ public class MainActivity extends Activity {
         cur.run();
         if (st.hasPin()) showLock();
         bg.execute(() -> trash.purgeOlder(st.purgeDays()));
+        pendingScan = getIntent().getBooleanExtra("scan", false);
+        maybeAutoScan();
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+        pendingScan = i.getBooleanExtra("scan", false);
+        maybeAutoScan();
+    }
+
+    void maybeAutoScan() {
+        if (pendingScan && !locked && !scanning && hasAccess()) {
+            pendingScan = false;
+            startScan();
+        }
     }
 
     @Override
@@ -137,6 +170,16 @@ public class MainActivity extends Activity {
             return;
         }
         if (working) scan.cancel = true;
+        if (cur == pickRun && pickPath != null && !pickPath.equals(ROOT)) {
+            pickPath = parentOf(pickPath);
+            picker();
+            return;
+        }
+        if (cur == foldRun && foldPath != null && !foldPath.equals(ROOT)) {
+            foldPath = parentOf(foldPath);
+            folders();
+            return;
+        }
         if (!back.isEmpty()) {
             cur = back.pop();
             cur.run();
@@ -149,6 +192,12 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         cur.run();
+    }
+
+    String parentOf(String p) {
+        int i = p.lastIndexOf('/');
+        String r = i > 0 ? p.substring(0, i) : ROOT;
+        return r.length() < ROOT.length() ? ROOT : r;
     }
 
     void nav(Runnable r) {
@@ -403,6 +452,7 @@ public class MainActivity extends Activity {
             needRefresh = false;
             cur.run();
         }
+        maybeAutoScan();
     }
 
     EditText pinField(String hint) {
@@ -490,6 +540,7 @@ public class MainActivity extends Activity {
 
         // Analyse
         b.addView(btn(Tr.t(scan.scanned ? "rescan" : "scan"), GRN, BG, v -> startScan()), lpw(10));
+        if (scan.scanned) b.addView(btn(Tr.t("quick"), ACC, BG, v -> quickClean()), lpw(8));
 
         // Répartition
         if (scan.scanned) {
@@ -517,24 +568,36 @@ public class MainActivity extends Activity {
         // Fonctions
         boolean sc = scan.scanned;
         menu(b, "📏", "f_large", sc ? Tr.f("sub_items", scan.large.size(), Tr.size(Scan.sum(scan.large))) : Tr.t("s_large"),
-                () -> needScan(() -> nav(() -> fileList("f_large", "d_large", scan.large, false, false))));
-        menu(b, "👯", "f_dups", scan.dupsReady ? Tr.f("dups_sub", scan.dupGroups.size(), Tr.size(scan.dupFreeable())) : Tr.t("s_dups"),
+                () -> needScan(() -> nav(this::largeScreen)));
+        menu(b, "👯", "f_dups", scan.dupG.ready ? Tr.f("dups_sub", scan.dupG.groups.size(), Tr.size(scan.dupG.freeable())) : Tr.t("s_dups"),
                 () -> needScan(() -> nav(this::dupsScreen)));
+        menu(b, "🔍", "f_similar", scan.photosReady ? Tr.f("dups_sub", scan.simG.groups.size(), Tr.size(scan.simG.freeable())) : Tr.t("s_similar"),
+                () -> needScan(() -> nav(this::similarScreen)));
+        menu(b, "🌀", "f_blur", scan.photosReady ? Tr.f("sub_items", scan.blurry.size(), Tr.size(Scan.sum(scan.blurry))) : Tr.t("s_blur"),
+                () -> needScan(() -> nav(this::blurScreen)));
+        menu(b, "📉", "f_compress", sc ? Tr.f("sub_items", scan.bigPhotos.size(), Tr.size(Scan.sum(scan.bigPhotos))) : Tr.t("s_compress"),
+                () -> needScan(() -> nav(() -> fileList(cfg("f_compress", "d_compress", scan.bigPhotos, false, "compress")))));
+        menu(b, "📂", "f_folders", Tr.t("s_folders"),
+                () -> needScan(() -> {
+                    foldPath = ROOT;
+                    nav(foldRun);
+                }));
         menu(b, "📥", "f_old", sc ? Tr.f("sub_items", scan.oldDl.size(), Tr.size(Scan.sum(scan.oldDl))) : Tr.t("s_old"),
-                () -> needScan(() -> nav(() -> fileList("f_old", "d_old", scan.oldDl, false, false))));
+                () -> needScan(() -> nav(() -> fileList(cfg("f_old", "d_old", scan.oldDl, false, "del")))));
         menu(b, "📸", "f_shots", sc ? Tr.f("sub_items", scan.shots.size(), Tr.size(Scan.sum(scan.shots))) : Tr.t("s_shots"),
-                () -> needScan(() -> nav(() -> fileList("f_shots", "d_shots", scan.shots, false, false))));
+                () -> needScan(() -> nav(() -> fileList(cfg("f_shots", "d_shots", scan.shots, false, "del")))));
         menu(b, "📦", "f_apk", sc ? Tr.f("sub_items", scan.apks.size(), Tr.size(Scan.sum(scan.apks))) : Tr.t("s_apk"),
-                () -> needScan(() -> nav(() -> fileList("f_apk", "d_apk", scan.apks, false, false))));
+                () -> needScan(() -> nav(() -> fileList(cfg("f_apk", "d_apk", scan.apks, false, "del")))));
         menu(b, "💬", "f_msg", sc ? Tr.f("sub_items", scan.msg.size(), Tr.size(Scan.sum(scan.msg))) : Tr.t("s_msg"),
-                () -> needScan(() -> nav(() -> fileList("f_msg", "d_msg", scan.msg, false, false))));
+                () -> needScan(() -> nav(() -> fileList(cfg("f_msg", "d_msg", scan.msg, false, "del")))));
         menu(b, "🧹", "f_temp", sc ? Tr.f("sub_items", scan.temp.size(), Tr.size(Scan.sum(scan.temp))) : Tr.t("s_temp"),
-                () -> needScan(() -> nav(() -> fileList("f_temp", "d_temp", scan.temp, true, false))));
+                () -> needScan(() -> nav(() -> fileList(cfg("f_temp", "d_temp", scan.temp, true, "del")))));
         menu(b, "🗂️", "f_empty", sc ? Tr.f("sub_items", scan.empties.size(), Tr.size(0)) : Tr.t("s_empty"),
-                () -> needScan(() -> nav(() -> fileList("f_empty", "d_empty", scan.empties, true, false))));
+                () -> needScan(() -> nav(() -> fileList(cfg("f_empty", "d_empty", scan.empties, true, "del")))));
         menu(b, "📱", "f_apps", Tr.t("s_apps"), () -> nav(this::apps));
         menu(b, "💾", "f_cache", Tr.t("s_cache"), () -> nav(this::cacheScreen));
         menu(b, "🗑️", "f_trash", Tr.t("s_trash") + " · " + Tr.size(trash.totalSize()), () -> nav(this::trashScreen));
+        menu(b, "🗄️", "f_backups", Tr.t("s_backups"), () -> nav(this::backups));
         menu(b, "📊", "f_report", Tr.t("s_report"), () -> nav(this::report));
     }
 
@@ -572,6 +635,7 @@ public class MainActivity extends Activity {
             askAccess();
             return;
         }
+        Scan.EXCL = st.excluded();
         scanning = true;
         working = true;
         LinearLayout page = scaffold(Tr.t("scanning"), false, null);
@@ -611,17 +675,13 @@ public class MainActivity extends Activity {
         });
     }
 
-    void dupsScreen() {
-        if (scan.dupsReady) {
-            fileList("f_dups", "d_dups", scan.dups, false, true);
-            return;
-        }
-        LinearLayout page = scaffold(Tr.t("f_dups"), true, null);
+    void progressScreen(String titleKey, final java.util.function.Supplier<String> status, final Runnable work) {
+        LinearLayout page = scaffold(Tr.t(titleKey), true, null);
         LinearLayout b = vbox();
         b.setGravity(Gravity.CENTER);
         b.setPadding(dp(24), dp(24), dp(24), dp(24));
         b.addView(new ProgressBar(this));
-        final TextView t = tv(Tr.t("dups_search"), 16, TXT, true);
+        final TextView t = tv(status.get(), 16, TXT, true);
         t.setGravity(Gravity.CENTER);
         t.setPadding(0, dp(16), 0, 0);
         b.addView(t, new LinearLayout.LayoutParams(-1, -2));
@@ -633,12 +693,12 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 if (!working || cur != me) return;
-                t.setText(Tr.t("dups_search") + " " + scan.dupDone + "/" + scan.dupTotal);
+                t.setText(status.get());
                 ui.postDelayed(this, 300);
             }
         });
         bg.execute(() -> {
-            scan.findDups();
+            work.run();
             ui.post(() -> {
                 working = false;
                 if (scan.cancel || cur != me) return;
@@ -647,15 +707,138 @@ public class MainActivity extends Activity {
         });
     }
 
+    void dupsScreen() {
+        if (!scan.dupG.ready) {
+            progressScreen("f_dups", () -> Tr.t("dups_search") + " " + scan.dupDone + "/" + scan.dupTotal, scan::findDups);
+            return;
+        }
+        Cfg c = cfg("f_dups", "d_dups", scan.dupG.flat, false, "del");
+        c.groups = scan.dupG;
+        fileList(c);
+    }
+
+    void photosProgress() {
+        progressScreen("f_similar", () -> Tr.t("photos_search") + " " + scan.photoDone.get() + "/" + scan.photoTotal,
+                () -> Photos.analyze(scan));
+    }
+
+    void similarScreen() {
+        if (!scan.photosReady) {
+            photosProgress();
+            return;
+        }
+        Cfg c = cfg("f_similar", "d_similar", scan.simG.flat, false, "del");
+        c.groups = scan.simG;
+        fileList(c);
+    }
+
+    void blurScreen() {
+        if (!scan.photosReady) {
+            photosProgress();
+            return;
+        }
+        fileList(cfg("f_blur", "d_blur", scan.blurry, false, "del"));
+    }
+
+    void backups() {
+        File d = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), Scan.BACKUP_DIR_NAME);
+        ArrayList<Scan.Item> l = new ArrayList<>();
+        File[] fs = d.listFiles();
+        if (fs != null) for (File f : fs) if (f.isFile()) l.add(new Scan.Item(f.getAbsolutePath(), f.length(), f.lastModified()));
+        Collections.sort(l, (a, b) -> Long.compare(b.mtime, a.mtime));
+        fileList(cfg("f_backups", "d_backups", l, false, "del"));
+    }
+
+    // =====================================================================
+    // Gros fichiers avec filtres
+    // =====================================================================
+
+    TextView chip(String label, boolean on, final Runnable click) {
+        TextView c = tv(label, 13, on ? BG : TXT, on);
+        c.setPadding(dp(12), dp(6), dp(12), dp(6));
+        c.setBackground(rr(on ? ACC : CARD2, 16));
+        c.setOnClickListener(v -> click.run());
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-2, -2);
+        p.setMarginEnd(dp(6));
+        c.setLayoutParams(p);
+        return c;
+    }
+
+    void largeScreen() {
+        final ArrayList<Scan.Item> view = new ArrayList<>();
+        final Runnable refresh = () -> {
+            view.clear();
+            for (Scan.Item it : scan.large) {
+                if (it.size >= largeMin && (largeCat < 0 || Scan.cat(it.name()) == largeCat)) view.add(it);
+            }
+        };
+        refresh.run();
+        LinearLayout ex = vbox();
+        ex.setPadding(dp(10), 0, dp(10), dp(6));
+        HorizontalScrollView h1 = new HorizontalScrollView(this);
+        LinearLayout r1 = hbox();
+        h1.addView(r1);
+        r1.addView(chip(Tr.t("large_all"), largeCat < 0, () -> {
+            largeCat = -1;
+            cur.run();
+        }));
+        for (int i = 0; i < 7; i++) {
+            final int ci = i;
+            r1.addView(chip(CATE[i] + " " + Tr.t("c" + i), largeCat == i, () -> {
+                largeCat = ci;
+                cur.run();
+            }));
+        }
+        ex.addView(h1);
+        LinearLayout r2 = hbox();
+        r2.setPadding(0, dp(6), 0, 0);
+        long[] mins = {10, 50, 100};
+        for (long mb : mins) {
+            final long min = mb * 1024 * 1024;
+            r2.addView(chip("≥ " + Tr.size(min), largeMin == min, () -> {
+                largeMin = min;
+                cur.run();
+            }));
+        }
+        ex.addView(r2);
+        Cfg c = cfg("f_large", "d_large", view, false, "del");
+        c.extra = ex;
+        c.refresh = refresh;
+        fileList(c);
+    }
+
     // =====================================================================
     // Listes de fichiers
     // =====================================================================
 
-    void fileList(final String fkey, String dkey, final ArrayList<Scan.Item> list, boolean pre, final boolean dupMode) {
-        LinearLayout page = scaffold(Tr.t(fkey), true, null);
-        if (dupMode) scan.dupDefaults();
-        else for (Scan.Item it : list) it.sel = pre;
-        page.addView(note(Tr.t(dkey)));
+    static class Cfg {
+        String fkey, dkey, act = "del";
+        ArrayList<Scan.Item> list;
+        Scan.Groups groups;
+        boolean pre;
+        View extra;
+        Runnable refresh;
+    }
+
+    Cfg cfg(String f, String d, ArrayList<Scan.Item> l, boolean pre, String act) {
+        Cfg c = new Cfg();
+        c.fkey = f;
+        c.dkey = d;
+        c.list = l;
+        c.pre = pre;
+        c.act = act;
+        return c;
+    }
+
+    void fileList(final Cfg c) {
+        final ArrayList<Scan.Item> list = c.list;
+        final boolean dupMode = c.groups != null;
+        final boolean compress = c.act.equals("compress");
+        LinearLayout page = scaffold(Tr.t(c.fkey), true, null);
+        if (dupMode) c.groups.defaults();
+        else for (Scan.Item it : list) it.sel = c.pre;
+        page.addView(note(Tr.t(c.dkey)));
+        if (c.extra != null) page.addView(c.extra);
 
         final FileAdapter ad = new FileAdapter(list);
         final ListView lv = new ListView(this);
@@ -669,7 +852,8 @@ public class MainActivity extends Activity {
         lv.setEmptyView(empty);
 
         final TextView summary = tv("", 13, TXT, false);
-        final Button delBtn = btn(Tr.t("del"), RED, WHITE, null);
+        final Button delBtn = btn(Tr.t(compress ? "compress" : "del"), compress ? GRN : RED, compress ? BG : WHITE, null);
+        final Button shBtn = btn("📤", CARD2, TXT, null);
         final Runnable upd = () -> {
             int n = 0;
             long s = 0;
@@ -682,14 +866,20 @@ public class MainActivity extends Activity {
             summary.setText(Tr.f("selinfo", n, Tr.size(s)));
             delBtn.setEnabled(n > 0);
             delBtn.setAlpha(n > 0 ? 1f : 0.4f);
+            shBtn.setEnabled(n > 0);
+            shBtn.setAlpha(n > 0 ? 1f : 0.4f);
             ad.notifyDataSetChanged();
+        };
+        final Runnable after = () -> {
+            if (c.refresh != null) c.refresh.run();
+            upd.run();
         };
 
         LinearLayout ctl = hbox();
         ctl.setPadding(dp(10), dp(2), dp(10), dp(6));
         Button all = btn(Tr.t("all"), CARD2, TXT, v -> {
             if (dupMode) {
-                scan.dupDefaults();
+                c.groups.defaults();
             } else {
                 for (Scan.Item it : list) it.sel = true;
             }
@@ -711,6 +901,9 @@ public class MainActivity extends Activity {
         foot.setPadding(dp(14), dp(8), dp(14), dp(8));
         foot.setBackgroundColor(CARD);
         foot.addView(summary, new LinearLayout.LayoutParams(0, -2, 1f));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-2, -2);
+        sp.setMarginEnd(dp(8));
+        foot.addView(shBtn, sp);
         foot.addView(delBtn);
         page.addView(foot, new LinearLayout.LayoutParams(-1, -2));
 
@@ -719,7 +912,8 @@ public class MainActivity extends Activity {
             if (it.hdr) return;
             if (dupMode && !it.sel) {
                 boolean other = false;
-                for (Scan.Item o : scan.dupGroups.get(it.group)) if (o != it && !o.sel) other = true;
+                ArrayList<Scan.Item> g = c.groups.of.get(it);
+                if (g != null) for (Scan.Item o : g) if (o != it && !o.sel) other = true;
                 if (!other) {
                     toast(Tr.t("keepone"));
                     return;
@@ -733,15 +927,105 @@ public class MainActivity extends Activity {
             if (!it.hdr) info(it);
             return true;
         });
-        delBtn.setOnClickListener(v -> confirmDelete(fkey, list, upd));
+        shBtn.setOnClickListener(v -> {
+            ArrayList<Scan.Item> sel = new ArrayList<>();
+            for (Scan.Item it : list) if (!it.hdr && it.sel) sel.add(it);
+            share(sel);
+        });
+        if (compress) delBtn.setOnClickListener(v -> confirmCompress(list, after));
+        else delBtn.setOnClickListener(v -> confirmDelete(c.fkey, list, after));
         upd.run();
     }
 
-    void info(Scan.Item it) {
+    void info(final Scan.Item it) {
         String p = it.orig != null ? it.orig : it.path;
-        new AlertDialog.Builder(this)
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
                 .setMessage(Tr.f("file_info", p, Tr.size(it.size), Tr.date(it.mtime)))
-                .setPositiveButton(Tr.t("ok"), null).show();
+                .setPositiveButton(Tr.t("ok"), null);
+        if (!it.dir) b.setNeutralButton(Tr.t("share"), (d, w) -> share(Collections.singletonList(it)));
+        b.show();
+    }
+
+    // ---- Partage ----
+
+    void share(List<Scan.Item> items) {
+        ArrayList<Uri> uris = new ArrayList<>();
+        for (Scan.Item it : items) if (!it.dir && !it.hdr) uris.add(ShareProvider.uriFor(it.path));
+        if (uris.isEmpty()) return;
+        if (uris.size() > 50) {
+            toast(Tr.t("share_max"));
+            return;
+        }
+        Intent i;
+        if (uris.size() == 1) {
+            i = new Intent(Intent.ACTION_SEND);
+            i.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+            i.setType("*/*");
+        } else {
+            i = new Intent(Intent.ACTION_SEND_MULTIPLE);
+            i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+            i.setType("*/*");
+        }
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        ClipData cd = ClipData.newRawUri("", uris.get(0));
+        for (int k = 1; k < uris.size(); k++) cd.addItem(new ClipData.Item(uris.get(k)));
+        i.setClipData(cd);
+        try {
+            startActivity(Intent.createChooser(i, Tr.t("share")));
+        } catch (Exception e) {
+            toast("?");
+        }
+    }
+
+    // ---- Suppression ----
+
+    static class Res {
+        int ok, fail;
+        long freed;
+        final ArrayList<Scan.Item> done = new ArrayList<>();
+    }
+
+    void rescanMedia(List<Scan.Item> items) {
+        ArrayList<String> p = new ArrayList<>();
+        for (Scan.Item it : items) if (!it.dir && Scan.cat(it.name()) <= 2) p.add(it.path);
+        if (!p.isEmpty() && p.size() <= 500) {
+            try {
+                MediaScannerConnection.scanFile(this, p.toArray(new String[0]), null, null);
+            } catch (Exception e) {
+                // ignoré
+            }
+        }
+    }
+
+    /** À appeler hors du fil d'interface. */
+    Res deleteItems(String fkey, List<Scan.Item> chosen, boolean toTrash) {
+        Res r = new Res();
+        for (Scan.Item it : chosen) {
+            if (Scan.isExcluded(it.path)) {
+                r.fail++;
+                continue;
+            }
+            File f = new File(it.path);
+            boolean ok;
+            if (!f.exists()) ok = true;
+            else if (f.isDirectory()) ok = f.delete();
+            else if (toTrash) ok = trash.move(f);
+            else ok = f.delete();
+            if (ok) {
+                r.ok++;
+                r.freed += it.size;
+                r.done.add(it);
+            } else {
+                r.fail++;
+            }
+        }
+        if (r.ok > 0) trash.log(fkey, r.ok, r.freed, toTrash ? "T" : "D");
+        rescanMedia(r.done);
+        return r;
+    }
+
+    boolean directOnly(String fkey) {
+        return fkey.equals("f_empty") || fkey.equals("f_backups");
     }
 
     void confirmDelete(final String fkey, final ArrayList<Scan.Item> list, final Runnable after) {
@@ -754,8 +1038,9 @@ public class MainActivity extends Activity {
             }
         }
         if (chosen.isEmpty()) return;
-        final boolean toTrash = st.useTrash() && !fkey.equals("f_empty");
+        final boolean toTrash = st.useTrash() && !directOnly(fkey);
         String msg = Tr.f(toTrash ? "confirm_trash" : "confirm_del", chosen.size(), Tr.size(s));
+        if (st.zipBackup() && !directOnly(fkey)) msg += "\n\n" + Tr.t("zip_note");
         new AlertDialog.Builder(this).setTitle(Tr.t("confirm")).setMessage(msg)
                 .setPositiveButton(Tr.t("yes"), (d, w) -> doDelete(fkey, chosen, toTrash, after))
                 .setNegativeButton(Tr.t("no"), null).show();
@@ -763,37 +1048,345 @@ public class MainActivity extends Activity {
 
     void doDelete(final String fkey, final ArrayList<Scan.Item> chosen, final boolean toTrash, final Runnable after) {
         final AlertDialog dlg = busy(Tr.t("working"));
+        final boolean zip = st.zipBackup() && !directOnly(fkey);
         bg.execute(() -> {
-            int ok = 0, fail = 0;
-            long freed = 0;
-            final ArrayList<Scan.Item> done = new ArrayList<>();
-            for (Scan.Item it : chosen) {
-                File f = new File(it.path);
-                boolean r;
-                if (!f.exists()) r = true;
-                else if (f.isDirectory()) r = f.delete();
-                else if (toTrash) r = trash.move(f);
-                else r = f.delete();
-                if (r) {
-                    ok++;
-                    freed += it.size;
-                    done.add(it);
-                } else {
-                    fail++;
+            File z = null;
+            if (zip) {
+                ArrayList<String> ps = new ArrayList<>();
+                for (Scan.Item it : chosen) if (!it.dir) ps.add(it.path);
+                if (!ps.isEmpty()) {
+                    z = Trash.backupZip(ps);
+                    if (z == null) {
+                        ui.post(() -> {
+                            dlg.dismiss();
+                            toast(Tr.t("zip_fail"));
+                        });
+                        return;
+                    }
                 }
             }
-            if (ok > 0) trash.log(fkey, ok, freed, toTrash ? "T" : "D");
-            final int fo = ok, ff = fail;
-            final long fb = freed;
+            final File zf = z;
+            final Res r = deleteItems(fkey, chosen, toTrash);
             ui.post(() -> {
-                scan.removed(done);
+                scan.removed(r.done);
                 dlg.dismiss();
-                String m = Tr.f("done", fo, Tr.size(fb));
-                if (ff > 0) m += " — " + Tr.f("failed", ff);
+                String m = Tr.f("done", r.ok, Tr.size(r.freed));
+                if (r.fail > 0) m += " — " + Tr.f("failed", r.fail);
+                if (zf != null) m += "\n" + Tr.f("zip_ok", zf.getName());
                 toast(m);
                 after.run();
             });
         });
+    }
+
+    // ---- Compression ----
+
+    void confirmCompress(final ArrayList<Scan.Item> list, final Runnable after) {
+        final ArrayList<Scan.Item> chosen = new ArrayList<>();
+        for (Scan.Item it : list) if (!it.hdr && it.sel) chosen.add(it);
+        if (chosen.isEmpty()) return;
+        new AlertDialog.Builder(this).setTitle(Tr.f("compress_title", chosen.size()))
+                .setItems(new String[]{Tr.t("q_high"), Tr.t("q_mid")}, (d, which) ->
+                        doCompress(chosen, which == 0 ? 85 : 70, which == 0 ? 3000 : 2048, after))
+                .setNegativeButton(Tr.t("cancel"), null).show();
+    }
+
+    void doCompress(final ArrayList<Scan.Item> chosen, final int quality, final int maxSide, final Runnable after) {
+        final AlertDialog dlg = busy(Tr.t("working"));
+        final boolean keep = st.useTrash();
+        bg.execute(() -> {
+            int ok = 0, skip = 0;
+            long saved = 0;
+            final ArrayList<Scan.Item> touched = new ArrayList<>();
+            final ArrayList<long[]> sizes = new ArrayList<>();
+            for (Scan.Item it : chosen) {
+                File f = new File(it.path);
+                if (!f.isFile() || Scan.isExcluded(it.path)) {
+                    skip++;
+                    continue;
+                }
+                long old = f.length();
+                File tmp = Photos.compressTo(f, quality, maxSide);
+                if (tmp == null) {
+                    skip++;
+                    continue;
+                }
+                long nw = tmp.length();
+                if (nw >= old * 0.9) {
+                    tmp.delete();
+                    skip++;
+                    continue;
+                }
+                if (keep && !trash.copyIn(f)) {
+                    tmp.delete();
+                    skip++;
+                    continue;
+                }
+                if (tmp.renameTo(f)) {
+                    ok++;
+                    saved += old - nw;
+                    touched.add(it);
+                    sizes.add(new long[]{nw});
+                } else {
+                    tmp.delete();
+                    skip++;
+                }
+            }
+            if (ok > 0) trash.log("f_compress", ok, saved, "C");
+            rescanMedia(touched);
+            final int fo = ok, fs = skip;
+            final long fsaved = saved;
+            ui.post(() -> {
+                for (int i = 0; i < touched.size(); i++) scan.resized(touched.get(i), sizes.get(i)[0]);
+                dlg.dismiss();
+                toast(Tr.f("compressed", fo, Tr.size(fsaved), fs));
+                after.run();
+            });
+        });
+    }
+
+    // =====================================================================
+    // Nettoyage rapide
+    // =====================================================================
+
+    void quickClean() {
+        final AlertDialog dlg = busy(Tr.t("working"));
+        bg.execute(() -> {
+            final LinkedHashMap<String, ArrayList<Scan.Item>> set = scan.quickSet(getPackageManager());
+            ui.post(() -> {
+                dlg.dismiss();
+                showQuick(set);
+            });
+        });
+    }
+
+    void showQuick(final LinkedHashMap<String, ArrayList<Scan.Item>> set) {
+        if (set.isEmpty()) {
+            toast(Tr.t("quick_none"));
+            return;
+        }
+        long tot = 0;
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<String, ArrayList<Scan.Item>> e : set.entrySet()) {
+            long s = Scan.sum(e.getValue());
+            tot += s;
+            sb.append("• ").append(Tr.t(e.getKey())).append(" : ").append(e.getValue().size())
+                    .append(" · ").append(Tr.size(s)).append("\n");
+        }
+        String msg = Tr.f("quick_msg", Tr.size(tot)) + "\n\n" + sb + "\n" + Tr.t("quick_what") + "\n\n" + Tr.t("quick_ask");
+        new AlertDialog.Builder(this).setTitle(Tr.t("quick_title")).setMessage(msg)
+                .setPositiveButton(Tr.t("yes"), (d, w) -> runQuick(set))
+                .setNegativeButton(Tr.t("no"), null).show();
+    }
+
+    void runQuick(final LinkedHashMap<String, ArrayList<Scan.Item>> set) {
+        final AlertDialog dlg = busy(Tr.t("working"));
+        final boolean useTrash = st.useTrash();
+        bg.execute(() -> {
+            int ok = 0, fail = 0;
+            long freed = 0;
+            final ArrayList<Scan.Item> all = new ArrayList<>();
+            for (java.util.Map.Entry<String, ArrayList<Scan.Item>> e : set.entrySet()) {
+                Res r = deleteItems(e.getKey(), e.getValue(), useTrash && !directOnly(e.getKey()));
+                ok += r.ok;
+                fail += r.fail;
+                freed += r.freed;
+                all.addAll(r.done);
+            }
+            final int fo = ok, ff = fail;
+            final long fb = freed;
+            ui.post(() -> {
+                scan.removed(all);
+                dlg.dismiss();
+                String m = Tr.f("done", fo, Tr.size(fb));
+                if (ff > 0) m += " — " + Tr.f("failed", ff);
+                toast(m);
+                cur.run();
+            });
+        });
+    }
+
+    // =====================================================================
+    // Dossiers les plus lourds
+    // =====================================================================
+
+    void folders() {
+        LinearLayout page = scaffold(Tr.t("f_folders"), true, null);
+        long total;
+        if (foldPath.equals(ROOT)) {
+            total = scan.nBytes;
+        } else {
+            Long t = scan.dirBytes.get(foldPath);
+            total = t == null ? 0 : t;
+        }
+        String shown = foldPath.length() > ROOT.length() ? foldPath.substring(ROOT.length()) : "/";
+        page.addView(note(shown + " · " + Tr.size(total) + "\n" + Tr.t("fold_info")));
+        ScrollView sv = new ScrollView(this);
+        LinearLayout b = vbox();
+        b.setPadding(dp(14), dp(4), dp(14), dp(20));
+        sv.addView(b);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        ArrayList<Scan.Item> ch = scan.childrenOf.get(foldPath);
+        long kids = 0;
+        if (ch != null) {
+            for (Scan.Item c : ch) {
+                kids += c.size;
+                b.addView(folderRow(c, total), lpw(8));
+            }
+        }
+        long own = total - kids;
+        if (own > 0) {
+            LinearLayout row = hbox();
+            row.setPadding(dp(14), dp(12), dp(14), dp(12));
+            row.setBackground(rr(CARD, 14));
+            row.addView(tv("📄 " + Tr.t("fold_files"), 14, SUB, false), new LinearLayout.LayoutParams(0, -2, 1f));
+            row.addView(tv(Tr.size(own), 14, SUB, true));
+            b.addView(row, lpw(8));
+        }
+        if (ch == null && own <= 0) b.addView(tv(Tr.t("empty_list"), 15, SUB, false));
+    }
+
+    View folderRow(final Scan.Item c, long total) {
+        LinearLayout row = vbox();
+        row.setPadding(dp(14), dp(12), dp(14), dp(8));
+        row.setBackground(rr(CARD, 14));
+        LinearLayout top = hbox();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView n = tv("📁 " + c.name(), 15, TXT, true);
+        n.setSingleLine(true);
+        n.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        top.addView(n, new LinearLayout.LayoutParams(0, -2, 1f));
+        top.addView(tv(Tr.size(c.size), 14, ACC, true));
+        row.addView(top);
+        row.addView(bar(new long[]{c.size, Math.max(total - c.size, 0)}, new int[]{ACC, CARD2}), barLp());
+        row.setOnClickListener(v -> {
+            if (scan.childrenOf.containsKey(c.path)) {
+                foldPath = c.path;
+                folders();
+            }
+        });
+        row.setOnLongClickListener(v -> {
+            askExclude(c.path);
+            return true;
+        });
+        return row;
+    }
+
+    void askExclude(final String path) {
+        new AlertDialog.Builder(this).setTitle(Tr.t("confirm"))
+                .setMessage(Tr.t("excl_ask") + "\n" + path)
+                .setPositiveButton(Tr.t("yes"), (d, w) -> {
+                    Set<String> s = st.excluded();
+                    s.add(path);
+                    st.setExcluded(s);
+                    Scan.EXCL = st.excluded();
+                    toast(Tr.t("excl_done"));
+                })
+                .setNegativeButton(Tr.t("no"), null).show();
+    }
+
+    // =====================================================================
+    // Exclusions
+    // =====================================================================
+
+    void exclusions() {
+        LinearLayout page = scaffold(Tr.t("excl_title"), true, null);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout b = vbox();
+        b.setPadding(dp(14), dp(4), dp(14), dp(24));
+        sv.addView(b);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        b.addView(note(Tr.t("excl_info")));
+        ArrayList<String> sorted = new ArrayList<>(st.excluded());
+        Collections.sort(sorted);
+        if (sorted.isEmpty()) {
+            TextView t = tv(Tr.t("excl_none"), 14, SUB, false);
+            t.setPadding(dp(14), dp(6), dp(14), dp(6));
+            b.addView(t);
+        }
+        for (final String p : sorted) {
+            LinearLayout row = hbox();
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(14), dp(8), dp(8), dp(8));
+            row.setBackground(rr(CARD, 14));
+            String shown = p.startsWith(ROOT) && p.length() > ROOT.length() ? p.substring(ROOT.length()) : p;
+            TextView t = tv("📁 " + shown, 14, TXT, false);
+            t.setSingleLine(true);
+            t.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            row.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
+            row.addView(btn(Tr.t("excl_remove"), CARD2, TXT, v -> {
+                Set<String> s = st.excluded();
+                s.remove(p);
+                st.setExcluded(s);
+                Scan.EXCL = st.excluded();
+                cur.run();
+            }));
+            b.addView(row, lpw(8));
+        }
+        b.addView(btn(Tr.t("excl_add"), ACC, BG, v -> {
+            pickPath = ROOT;
+            nav(pickRun);
+        }), lpw(14));
+    }
+
+    void picker() {
+        String shown = pickPath.length() > ROOT.length() ? pickPath.substring(ROOT.length()) : "/";
+        LinearLayout page = scaffold(shown, true, null);
+        LinearLayout.LayoutParams lp = lpw(8);
+        lp.leftMargin = dp(14);
+        lp.rightMargin = dp(14);
+        page.addView(btn(Tr.t("excl_pick"), GRN, BG, v -> {
+            Set<String> s = st.excluded();
+            s.add(pickPath);
+            st.setExcluded(s);
+            Scan.EXCL = st.excluded();
+            toast(Tr.t("excl_done"));
+            pickPath = ROOT;
+            onBackPressed();
+        }), lp);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout b = vbox();
+        b.setPadding(dp(14), dp(4), dp(14), dp(20));
+        sv.addView(b);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        ArrayList<File> ds = new ArrayList<>();
+        File[] all = new File(pickPath).listFiles();
+        if (all != null) for (File f : all) if (f.isDirectory()) ds.add(f);
+        Collections.sort(ds, (x, y) -> x.getName().compareToIgnoreCase(y.getName()));
+        if (ds.isEmpty()) {
+            TextView t = tv(Tr.t("pick_empty"), 14, SUB, false);
+            t.setPadding(dp(4), dp(10), dp(4), dp(10));
+            b.addView(t);
+        }
+        for (final File f : ds) {
+            TextView t = tv("📁 " + f.getName(), 15, TXT, false);
+            t.setPadding(dp(14), dp(12), dp(14), dp(12));
+            t.setBackground(rr(CARD, 12));
+            t.setOnClickListener(v -> {
+                pickPath = f.getAbsolutePath();
+                picker();
+            });
+            b.addView(t, lpw(6));
+        }
+    }
+
+    // =====================================================================
+    // Rappel périodique
+    // =====================================================================
+
+    void applyReminder(int days) {
+        try {
+            JobScheduler js = (JobScheduler) getSystemService(Context.JOB_SCHEDULER_SERVICE);
+            js.cancel(7);
+            if (days > 0) {
+                js.schedule(new JobInfo.Builder(7, new ComponentName(this, ReminderJob.class))
+                        .setPeriodic(days * 86400000L)
+                        .setPersisted(true)
+                        .build());
+            }
+        } catch (Exception e) {
+            toast("?");
+        }
     }
 
     // ---- Adaptateur de liste avec miniatures ----
@@ -868,7 +1461,7 @@ public class MainActivity extends Activity {
                     h.setPadding(dp(14), dp(12), dp(14), dp(6));
                     h.setBackgroundColor(CARD);
                 }
-                h.setText(Tr.f("group_hdr", it.gnum, it.gcount, Tr.size(it.gsize)));
+                h.setText(Tr.f(it.hk, it.gnum, it.gcount, Tr.size(it.gsize)));
                 return h;
             }
             Row r;
@@ -1264,9 +1857,10 @@ public class MainActivity extends Activity {
         sv.addView(b);
         page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
         ArrayList<String[]> h = trash.history();
-        long freed = 0;
+        long freed = 0, comp = 0;
         for (String[] r : h) {
             try {
+                if (r[4].equals("C")) comp += Long.parseLong(r[3]);
                 if (r[4].equals("D")) freed += Long.parseLong(r[3]);
             } catch (NumberFormatException e) {
                 // ignoré
@@ -1276,6 +1870,7 @@ public class MainActivity extends Activity {
         c.addView(tv(Tr.t("rep_freed"), 13, SUB, false));
         c.addView(tv(Tr.size(freed), 26, GRN, true));
         c.addView(tv(Tr.t("rep_trash") + " : " + Tr.size(trash.totalSize()), 14, TXT, false));
+        c.addView(tv(Tr.t("rep_comp") + " : " + Tr.size(comp), 14, TXT, false));
         c.addView(tv(Tr.t("rep_ops") + " : " + h.size(), 14, TXT, false));
         b.addView(c, lpw(0));
         TextView title = tv(Tr.t("rep_hist"), 16, TXT, true);
@@ -1375,6 +1970,52 @@ public class MainActivity extends Activity {
         }
         ct.addView(dr);
         b.addView(ct, lpw(10));
+
+        // Sauvegarde ZIP
+        LinearLayout cz = card();
+        CheckBox zb = new CheckBox(this);
+        zb.setText(Tr.t("zip_use"));
+        zb.setTextColor(TXT);
+        zb.setButtonTintList(ColorStateList.valueOf(ACC));
+        zb.setChecked(st.zipBackup());
+        zb.setOnCheckedChangeListener((x, ch) -> st.setZipBackup(ch));
+        cz.addView(zb);
+        cz.addView(tv(Tr.t("zip_info"), 12, SUB, false));
+        b.addView(cz, lpw(10));
+
+        // Rappel périodique
+        LinearLayout cr = card();
+        cr.addView(tv(Tr.t("remind_title"), 16, TXT, true));
+        TextView ri = tv(Tr.t("remind_info"), 12, SUB, false);
+        ri.setPadding(0, dp(2), 0, dp(6));
+        cr.addView(ri);
+        LinearLayout rrow = hbox();
+        int[] ropts = {0, 7, 15, 30};
+        for (int i = 0; i < ropts.length; i++) {
+            final int d = ropts[i];
+            boolean on = st.reminderDays() == d;
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+            if (i < ropts.length - 1) lp.setMarginEnd(dp(6));
+            Button rb = btn(d == 0 ? Tr.t("remind_off") : String.valueOf(d), on ? ACC : CARD2, on ? BG : TXT, v -> {
+                st.setReminderDays(d);
+                applyReminder(d);
+                if (d > 0 && Build.VERSION.SDK_INT >= 33) {
+                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2);
+                }
+                cur.run();
+            });
+            rb.setPadding(dp(4), dp(10), dp(4), dp(10));
+            rrow.addView(rb, lp);
+        }
+        cr.addView(rrow);
+        b.addView(cr, lpw(10));
+
+        // Exclusions
+        b.addView(btn("📁 " + Tr.t("excl_title"), CARD2, TXT, v -> nav(this::exclusions)), lpw(10));
+
+        TextView wi = tv(Tr.t("widget_info"), 12, SUB, false);
+        wi.setPadding(dp(4), dp(12), dp(4), 0);
+        b.addView(wi);
 
         TextView ab = tv(Tr.t("about"), 12, SUB, false);
         ab.setPadding(dp(4), dp(16), dp(4), 0);

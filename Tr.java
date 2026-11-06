@@ -199,6 +199,77 @@ class Tr {
         a("trash_use", "Utiliser la corbeille (recommandé)", "استخدام سلة المحذوفات (موصى به)");
         a("purge_days", "Vidage automatique après", "الإفراغ التلقائي بعد");
         a("days", "%d jours", "%d يوماً");
+
+        a("f_similar", "Photos similaires", "الصور المتشابهة");
+        a("f_blur", "Photos floues", "الصور الضبابية");
+        a("f_compress", "Compression des photos", "ضغط الصور");
+        a("f_folders", "Dossiers les plus lourds", "أثقل المجلدات");
+        a("f_backups", "Sauvegardes (ZIP)", "النسخ الاحتياطية (ZIP)");
+        a("s_similar", "Rafales et quasi-doublons", "لقطات متتالية ومتشابهة");
+        a("s_blur", "Estimation automatique", "تقدير تلقائي");
+        a("s_compress", "Réduire la taille", "تقليل الحجم");
+        a("s_folders", "Où va l'espace ?", "أين تذهب المساحة؟");
+        a("s_backups", "Copies avant suppression", "نسخ قبل الحذف");
+        a("d_similar", "Photos presque identiques (même scène). La plus grande est conservée par défaut.",
+                "صور شبه متطابقة (المشهد نفسه). تُحفظ الأكبر افتراضياً.");
+        a("d_blur", "Photos probablement floues (estimation automatique : vérifiez avant de supprimer). Appui long pour voir les détails ou partager.",
+                "صور يُحتمل أنها ضبابية (تقدير تلقائي: تحقق قبل الحذف). اضغط مطولاً للتفاصيل أو المشاركة.");
+        a("d_compress", "Photos JPEG de plus de 1,5 Mo. Dates et position GPS conservées ; l'original va à la corbeille si elle est activée.",
+                "صور JPEG أكبر من 1.5 م.ب. يتم الاحتفاظ بالتاريخ والموقع، وتُنقل الأصلية إلى السلة إن كانت مفعّلة.");
+        a("d_backups", "Archives ZIP créées avant suppression. Utilisez 📤 pour les envoyer vers Drive ou par e-mail.",
+                "أرشيفات ZIP أُنشئت قبل الحذف. استخدم 📤 لإرسالها إلى Drive أو بالبريد.");
+        a("sim_hdr", "Groupe %d · %d photos similaires · %s", "المجموعة %d · %d صور متشابهة · %s");
+        a("photos_search", "Analyse des photos…", "جارٍ تحليل الصور…");
+
+        a("quick", "⚡ Nettoyage rapide", "⚡ تنظيف سريع");
+        a("quick_title", "Nettoyage rapide", "تنظيف سريع");
+        a("quick_msg", "Éléments sûrs sélectionnés automatiquement (%s) :", "عناصر آمنة تم تحديدها تلقائياً (%s):");
+        a("quick_what", "Temporaires, fichiers vides, APK déjà installés, captures de plus de 30 jours.",
+                "ملفات مؤقتة وفارغة، وAPK مثبّتة مسبقاً، ولقطات شاشة أقدم من 30 يوماً.");
+        a("quick_none", "Rien de sûr à nettoyer pour le moment.", "لا توجد عناصر آمنة للتنظيف حالياً.");
+        a("quick_ask", "Lancer le nettoyage ?", "بدء التنظيف؟");
+
+        a("compress", "Compresser", "ضغط");
+        a("q_high", "Qualité élevée (environ −50 %)", "جودة عالية (حوالي −50٪)");
+        a("q_mid", "Qualité moyenne (environ −70 %)", "جودة متوسطة (حوالي −70٪)");
+        a("compress_title", "Compresser %d photo(s)", "ضغط %d صورة");
+        a("compressed", "%d photo(s) compressée(s), %s gagnés, %d ignorée(s)", "تم ضغط %d صورة، وُفّر %s، وتم تجاهل %d");
+
+        a("share", "Partager", "مشاركة");
+        a("share_max", "Sélectionnez 50 fichiers au maximum.", "اختر 50 ملفاً كحد أقصى.");
+        a("zip_ok", "Sauvegarde : %s", "النسخة الاحتياطية: %s");
+        a("zip_fail", "Sauvegarde ZIP impossible : suppression annulée.", "تعذّر إنشاء النسخة ZIP: تم إلغاء الحذف.");
+        a("zip_note", "Une sauvegarde ZIP sera créée avant la suppression.", "سيتم إنشاء نسخة ZIP قبل الحذف.");
+        a("zip_use", "Sauvegarder en ZIP avant suppression", "نسخ احتياطي ZIP قبل الحذف");
+        a("zip_info", "Dossier : Téléchargements/Nettoyage-sauvegardes", "المجلد: التنزيلات/Nettoyage-sauvegardes");
+
+        a("excl_title", "Dossiers exclus", "المجلدات المستثناة");
+        a("excl_info", "Ces dossiers ne sont jamais analysés ni modifiés. Relancez l'analyse après un changement.",
+                "لا يتم تحليل هذه المجلدات ولا تعديلها أبداً. أعد التحليل بعد أي تغيير.");
+        a("excl_add", "Ajouter un dossier", "إضافة مجلد");
+        a("excl_none", "Aucun dossier exclu.", "لا توجد مجلدات مستثناة.");
+        a("excl_pick", "Exclure ce dossier", "استثناء هذا المجلد");
+        a("excl_done", "Dossier exclu. Relancez l'analyse.", "تم الاستثناء. أعد التحليل.");
+        a("excl_remove", "Retirer", "إزالة");
+        a("excl_ask", "Exclure ce dossier de l'analyse ?", "استثناء هذا المجلد من التحليل؟");
+        a("pick_empty", "Aucun sous-dossier.", "لا توجد مجلدات فرعية.");
+        a("fold_info", "Touchez un dossier pour l'ouvrir, appui long pour l'exclure de l'analyse.",
+                "المس مجلداً لفتحه، واضغط مطولاً لاستثنائه من التحليل.");
+        a("fold_files", "Fichiers de ce dossier", "ملفات هذا المجلد");
+
+        a("large_all", "Tous", "الكل");
+        a("remind_title", "Rappel de nettoyage", "تذكير التنظيف");
+        a("remind_off", "Jamais", "أبداً");
+        a("remind_info", "Une notification vous indique l'espace récupérable.", "إشعار يُعلمك بالمساحة القابلة للتحرير.");
+        a("remind_text", "%s peuvent être libérés.", "يمكن تحرير %s.");
+        a("remind_free", "Espace libre : %s.", "المساحة المتاحة: %s.");
+        a("remind_channel", "Rappels de nettoyage", "تذكيرات التنظيف");
+        a("w_clean", "Nettoyer", "تنظيف");
+        a("widget_info", "Widget : ajoutez « Nettoyage Téléphone » depuis les widgets de l'écran d'accueil.",
+                "الويدجت: أضف «تنظيف الهاتف» من ويدجت الشاشة الرئيسية.");
+        a("rep_comp", "Gain par compression", "التوفير بالضغط");
+        a("mode_C", "compressé", "مضغوط");
+
         a("about", "Version 1.0 — toutes les opérations restent sur votre téléphone.",
                 "الإصدار 1.0 — جميع العمليات تتم على هاتفك فقط.");
     }

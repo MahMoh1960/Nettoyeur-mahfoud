@@ -5,6 +5,9 @@ import android.content.SharedPreferences;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 
 /** Réglages et code PIN (stocké sous forme de hachage salé). */
 class Store {
@@ -22,6 +25,21 @@ class Store {
 
     int purgeDays() { return p.getInt("purge", 30); }
     void setPurgeDays(int d) { p.edit().putInt("purge", d).apply(); }
+
+    int reminderDays() { return p.getInt("remind", 0); }
+    void setReminderDays(int d) { p.edit().putInt("remind", d).apply(); }
+
+    boolean zipBackup() { return p.getBoolean("zip", false); }
+    void setZipBackup(boolean b) { p.edit().putBoolean("zip", b).apply(); }
+
+    Set<String> excluded() { return new HashSet<>(p.getStringSet("excl", new HashSet<String>())); }
+    void setExcluded(Set<String> s) { p.edit().putStringSet("excl", new HashSet<>(s)).apply(); }
+
+    /** Applique la langue enregistrée (ou celle du système) aux textes. */
+    void applyLang() {
+        String l = lang();
+        Tr.ar = l != null ? l.equals("ar") : Locale.getDefault().getLanguage().equals("ar");
+    }
 
     boolean hasPin() { return p.getString("pin_hash", null) != null; }
 
