@@ -28,7 +28,10 @@ jobs:
           mkdir -p proj/app/src/main/java/app/nettoyage proj/app/src/main/res/drawable
           cp *.java proj/app/src/main/java/app/nettoyage/
           cp AndroidManifest.xml proj/app/src/main/AndroidManifest.xml
+          mkdir -p proj/app/src/main/res/layout proj/app/src/main/res/xml
           cp ic_launcher.xml proj/app/src/main/res/drawable/ic_launcher.xml
+          cp widget.xml proj/app/src/main/res/layout/widget.xml
+          cp widget_info.xml proj/app/src/main/res/xml/widget_info.xml
           cat > proj/settings.gradle <<'EOT'
           pluginManagement {
               repositories {
