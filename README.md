@@ -28,6 +28,7 @@ Application Android de nettoyage du téléphone. Interface en **français** et e
 | Fichiers temporaires, Dossiers/fichiers vides | Présélectionnés. |
 | Applications rarement utilisées | Classées par dernière utilisation ; toucher pour désinstaller. |
 | Cache | Vide le cache de l'application ; ouvre le nettoyage de cache système ou les réglages de stockage. |
+| Cache des applications | Liste de toutes les applications classées par taille de cache (Android 8 et plus, accès aux statistiques d'utilisation requis). Toucher une application ouvre ses informations ; Stockage → Vider le cache, manuellement. |
 | Corbeille | 7, 15 ou 30 jours ; restauration possible. |
 | Sauvegardes (ZIP) | Archives créées avant suppression ; 📤 pour les envoyer vers Drive ou par e-mail. |
 | Rapport | Espace libéré, gain par compression, historique. |

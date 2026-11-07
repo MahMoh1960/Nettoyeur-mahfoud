@@ -3,6 +3,7 @@ package app.nettoyage;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
+import android.app.usage.StorageStatsManager;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
 import android.app.job.JobInfo;
@@ -596,6 +597,7 @@ public class MainActivity extends Activity {
                 () -> needScan(() -> nav(() -> fileList(cfg("f_empty", "d_empty", scan.empties, true, "del")))));
         menu(b, "📱", "f_apps", Tr.t("s_apps"), () -> nav(this::apps));
         menu(b, "💾", "f_cache", Tr.t("s_cache"), () -> nav(this::cacheScreen));
+        menu(b, "🧺", "f_appcache", Tr.t("s_appcache"), () -> nav(this::appCache));
         menu(b, "🗑️", "f_trash", Tr.t("s_trash") + " · " + Tr.size(trash.totalSize()), () -> nav(this::trashScreen));
         menu(b, "🗄️", "f_backups", Tr.t("s_backups"), () -> nav(this::backups));
         menu(b, "📊", "f_report", Tr.t("s_report"), () -> nav(this::report));
@@ -1685,6 +1687,7 @@ public class MainActivity extends Activity {
         LinearLayout c2 = card();
         TextView d = tv(Tr.t("cache_sys_d"), 13, SUB, false);
         c2.addView(d);
+        c2.addView(btn("🧺 " + Tr.t("f_appcache"), ACC, BG, v -> nav(this::appCache)), lpw(10));
         c2.addView(btn(Tr.t("cache_sys"), GRN, BG, v -> {
             try {
                 if (Build.VERSION.SDK_INT >= 26) {
@@ -1698,6 +1701,112 @@ public class MainActivity extends Activity {
         }), lpw(10));
         c2.addView(btn(Tr.t("open_storage"), CARD2, TXT, v -> openStorageSettings()), lpw(8));
         b.addView(c2, lpw(10));
+    }
+
+
+    // =====================================================================
+    // Cache des applications (vidage manuel via les réglages d'Android)
+    // =====================================================================
+
+    static class CacheRow {
+        String label, pkg;
+        long cache;
+        Drawable icon;
+    }
+
+    ArrayList<CacheRow> loadCaches() {
+        ArrayList<CacheRow> rows = new ArrayList<>();
+        if (Build.VERSION.SDK_INT < 26) return rows;
+        PackageManager pm = getPackageManager();
+        StorageStatsManager ssm = (StorageStatsManager) getSystemService(Context.STORAGE_STATS_SERVICE);
+        if (ssm == null) return rows;
+        for (ApplicationInfo ai : pm.getInstalledApplications(0)) {
+            try {
+                long c = ssm.queryStatsForPackage(StorageManager.UUID_DEFAULT, ai.packageName, Process.myUserHandle()).getCacheBytes();
+                if (c <= 0) continue;
+                CacheRow r = new CacheRow();
+                r.pkg = ai.packageName;
+                r.cache = c;
+                r.label = String.valueOf(pm.getApplicationLabel(ai));
+                r.icon = pm.getApplicationIcon(ai);
+                rows.add(r);
+            } catch (Exception e) {
+                // application inaccessible : ignorée
+            }
+        }
+        Collections.sort(rows, (a, b) -> Long.compare(b.cache, a.cache));
+        return rows;
+    }
+
+    void appCache() {
+        LinearLayout page = scaffold(Tr.t("f_appcache"), true, null);
+        if (!usageGranted()) {
+            page.addView(note(Tr.t("usage_need")));
+            Button g = btn(Tr.t("grant"), ACC, BG, v -> {
+                needRefresh = true;
+                try {
+                    startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+                } catch (Exception e) {
+                    toast("Settings ?");
+                }
+            });
+            LinearLayout.LayoutParams lp = lpw(10);
+            lp.leftMargin = dp(14);
+            lp.rightMargin = dp(14);
+            page.addView(g, lp);
+            return;
+        }
+        if (Build.VERSION.SDK_INT < 26) {
+            page.addView(note(Tr.t("appcache_unavail")));
+            return;
+        }
+        page.addView(note(Tr.t("appcache_hint")));
+        final TextView total = tv(Tr.t("apps_loading"), 15, ACC, true);
+        total.setPadding(dp(14), 0, dp(14), dp(6));
+        page.addView(total);
+        ScrollView sv = new ScrollView(this);
+        final LinearLayout list = vbox();
+        list.setPadding(dp(14), dp(4), dp(14), dp(20));
+        sv.addView(list);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        bg.execute(() -> {
+            final ArrayList<CacheRow> rows = loadCaches();
+            long sum = 0;
+            for (CacheRow r : rows) sum += r.cache;
+            final long fsum = sum;
+            ui.post(() -> {
+                total.setText(rows.isEmpty() ? Tr.t("appcache_none") : Tr.f("appcache_total", Tr.size(fsum)));
+                for (CacheRow r : rows) list.addView(cacheView(r), lpw(8));
+            });
+        });
+    }
+
+    View cacheView(final CacheRow r) {
+        LinearLayout row = hbox();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setBackground(rr(CARD, 14));
+        ImageView ic = new ImageView(this);
+        ic.setImageDrawable(r.icon);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(40), dp(40));
+        ip.setMarginEnd(dp(12));
+        row.addView(ic, ip);
+        TextView n = tv(r.label, 15, TXT, true);
+        n.setSingleLine(true);
+        n.setEllipsize(TextUtils.TruncateAt.END);
+        row.addView(n, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView sz = tv(Tr.size(r.cache), 14, ACC, true);
+        sz.setPaddingRelative(dp(8), 0, 0, 0);
+        row.addView(sz);
+        row.setOnClickListener(v -> {
+            needRefresh = true;
+            try {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + r.pkg)));
+            } catch (Exception e) {
+                toast("Settings ?");
+            }
+        });
+        return row;
     }
 
     // =====================================================================

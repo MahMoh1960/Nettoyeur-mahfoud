@@ -270,6 +270,13 @@ class Tr {
         a("rep_comp", "Gain par compression", "التوفير بالضغط");
         a("mode_C", "compressé", "مضغوط");
 
+        a("f_appcache", "Cache des applications", "ذاكرة التطبيقات المؤقتة");
+        a("s_appcache", "Voir et vider une par une", "عرض ومسح تطبيقاً تلو الآخر");
+        a("appcache_hint", "Classées du plus gros cache au plus petit. Touchez une application : ses informations s'ouvrent ; allez dans Stockage puis « Vider le cache » (Android interdit de le faire automatiquement).",
+                "مرتبة من الأكبر إلى الأصغر. المس تطبيقاً لفتح معلوماته، ثم اذهب إلى التخزين واضغط «مسح الذاكرة المؤقتة» (يمنع أندرويد ذلك تلقائياً).");
+        a("appcache_total", "Cache total des applications : %s", "إجمالي الذاكرة المؤقتة للتطبيقات: %s");
+        a("appcache_none", "Aucun cache détecté.", "لم يتم العثور على ذاكرة مؤقتة.");
+        a("appcache_unavail", "Les tailles de cache ne sont pas disponibles avant Android 8.", "أحجام الذاكرة المؤقتة غير متاحة قبل أندرويد 8.");
         a("about", "Version 1.0 — toutes les opérations restent sur votre téléphone.",
                 "الإصدار 1.0 — جميع العمليات تتم على هاتفك فقط.");
     }
