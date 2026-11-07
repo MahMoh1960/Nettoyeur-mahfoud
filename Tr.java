@@ -38,6 +38,14 @@ class Tr {
         return s + " " + u[i];
     }
 
+    static String dur(long ms) {
+        long m = ms / 60000;
+        long h = m / 60;
+        long mm = m % 60;
+        if (h > 0) return h + (ar ? " س " : " h ") + mm + (ar ? " د" : " min");
+        return mm + (ar ? " د" : " min");
+    }
+
     static String date(long ms) {
         return new SimpleDateFormat("dd/MM/yyyy", Locale.US).format(new Date(ms));
     }
@@ -277,6 +285,55 @@ class Tr {
         a("appcache_total", "Cache total des applications : %s", "إجمالي الذاكرة المؤقتة للتطبيقات: %s");
         a("appcache_none", "Aucun cache détecté.", "لم يتم العثور على ذاكرة مؤقتة.");
         a("appcache_unavail", "Les tailles de cache ne sont pas disponibles avant Android 8.", "أحجام الذاكرة المؤقتة غير متاحة قبل أندرويد 8.");
+        a("f_opt", "Optimiseur", "المحسّن");
+        a("s_opt", "Diagnostic et conseils", "تشخيص ونصائح");
+        a("opt_score", "Note de santé du téléphone", "درجة صحة الهاتف");
+        a("score_good", "Excellent", "ممتاز");
+        a("score_mid", "Correct", "جيد");
+        a("score_low", "À améliorer", "يحتاج تحسيناً");
+        a("m_storage", "Stockage libre", "التخزين المتاح");
+        a("m_ram", "Mémoire vive disponible", "الذاكرة العشوائية المتاحة");
+        a("m_batt", "Batterie", "البطارية");
+        a("m_up", "En marche depuis", "يعمل منذ");
+        a("up_fmt", "%d j %d h", "%d يوماً %d س");
+        a("opt_adv", "Conseils", "نصائح");
+        a("adv_ok", "Tout est en bon état.", "كل شيء بحالة جيدة.");
+        a("adv_storage", "Espace libre faible : lancez le nettoyage rapide.", "المساحة المتاحة قليلة: ابدأ التنظيف السريع.");
+        a("adv_ram", "Mémoire vive très sollicitée : fermez les applications inutiles ou redémarrez.",
+                "الذاكرة العشوائية مستنفدة: أغلق التطبيقات غير الضرورية أو أعد التشغيل.");
+        a("adv_up", "Redémarrez le téléphone (en marche depuis %d jours) : cela libère la mémoire et corrige des lenteurs.",
+                "أعد تشغيل الهاتف (يعمل منذ %d يوماً): يحرر الذاكرة ويعالج البطء.");
+        a("adv_temp", "Batterie chaude (%d °C) : évitez le soleil et la charge prolongée.",
+                "البطارية ساخنة (%d °م): تجنب الشمس والشحن المطوّل.");
+        a("adv_health", "L'état de la batterie est à surveiller.", "حالة البطارية تستدعي المراقبة.");
+        a("opt_all", "🚀 Tout optimiser", "🚀 تحسين شامل");
+        a("opt_cache", "Cache de l'application vidé : %s", "تم مسح ذاكرة التطبيق المؤقتة: %s");
+        a("f_hungry", "Applications gourmandes", "التطبيقات الأكثر استهلاكاً");
+        a("s_hungry", "Temps d'utilisation sur 7 jours", "مدة الاستخدام خلال 7 أيام");
+        a("hungry_hint", "Temps passé au premier plan ces 7 derniers jours. Touchez une application pour la forcer à s'arrêter, restreindre sa batterie ou la désinstaller.",
+                "الوقت الذي قضته في الواجهة خلال 7 أيام. المس تطبيقاً لإيقافه قسراً أو تقييد بطاريته أو إلغاء تثبيته.");
+        a("hungry_none", "Aucune donnée d'utilisation.", "لا توجد بيانات استخدام.");
+        a("f_tips", "Conseils et raccourcis", "نصائح واختصارات");
+        a("s_tips", "Batterie, fluidité, données", "البطارية والسلاسة والبيانات");
+        a("tips_batt", "Économie de batterie", "توفير البطارية");
+        a("tips_batt_d", "Limitez les applications actives en arrière-plan, activez le mode économie d'énergie, réduisez la luminosité et le délai de mise en veille.",
+                "قلّل التطبيقات العاملة في الخلفية، فعّل وضع توفير الطاقة، وخفّض السطوع ومهلة إطفاء الشاشة.");
+        a("b_opt", "Optimisation de la batterie", "تحسين البطارية");
+        a("b_saver", "Mode économie d'énergie", "وضع توفير الطاقة");
+        a("b_display", "Affichage (luminosité, veille)", "العرض (السطوع، السكون)");
+        a("tips_smooth", "Fluidité", "السلاسة");
+        a("tips_smooth_d", "Pour un téléphone plus réactif : activez les options pour développeurs (À propos du téléphone, puis touchez 7 fois « Numéro de build »), puis réglez les trois échelles d'animation sur 0,5×.",
+                "لهاتف أكثر استجابة: فعّل خيارات المطور (حول الهاتف ثم المس «رقم الإصدار» 7 مرات)، ثم اضبط مقاييس الرسوم المتحركة الثلاثة على 0.5×.");
+        a("b_about", "À propos du téléphone", "حول الهاتف");
+        a("b_dev", "Options pour développeurs", "خيارات المطور");
+        a("tips_data", "Données en arrière-plan", "البيانات في الخلفية");
+        a("tips_data_d", "Activez l'économiseur de données et limitez les données en arrière-plan des applications peu utiles.",
+                "فعّل موفّر البيانات وقيّد بيانات الخلفية للتطبيقات قليلة الفائدة.");
+        a("b_data", "Utilisation des données", "استخدام البيانات");
+        a("setting_fail", "Réglage introuvable sur ce téléphone.", "الإعداد غير متوفر على هذا الهاتف.");
+        a("reboot_tip", "Pensez à redémarrer le téléphone.", "فكّر في إعادة تشغيل الهاتف.");
+        a("reboot_banner", "Le téléphone fonctionne depuis %d jours : un redémarrage libère la mémoire et corrige les lenteurs.",
+                "الهاتف يعمل منذ %d يوماً: إعادة التشغيل تحرر الذاكرة وتعالج البطء.");
         a("about", "Version 1.0 — toutes les opérations restent sur votre téléphone.",
                 "الإصدار 1.0 — جميع العمليات تتم على هاتفك فقط.");
     }

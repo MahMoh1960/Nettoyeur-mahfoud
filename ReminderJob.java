@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
+import android.os.SystemClock;
 
 import java.util.ArrayList;
 
@@ -63,6 +64,7 @@ public class ReminderJob extends JobService {
             StatFs sf = new StatFs(Environment.getExternalStorageDirectory().getPath());
             text = Tr.f("remind_free", Tr.size(sf.getAvailableBytes()));
         }
+        if (SystemClock.elapsedRealtime() > 7L * 86400000L) text += " " + Tr.t("reboot_tip");
         notifyUser(text);
     }
 

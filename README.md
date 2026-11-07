@@ -17,6 +17,7 @@ Application Android de nettoyage du téléphone. Interface en **français** et e
 
 | Rubrique | Rôle |
 |---|---|
+| 🚀 Optimiseur | Note de santé (stockage, mémoire, batterie, durée depuis le dernier redémarrage) et conseils ; bouton « Tout optimiser » (cache de l'application, puis nettoyage rapide, avec analyse si nécessaire) ; applications gourmandes (temps d'utilisation sur 7 jours, accès à leurs réglages pour les arrêter ou les désinstaller) ; conseils et raccourcis (batterie, fluidité des animations, données en arrière-plan). Un bandeau et le rappel proposent de redémarrer après 7 jours sans redémarrage. |
 | ⚡ Nettoyage rapide | Après l'analyse : sélection automatique des éléments sûrs (temporaires, fichiers vides, APK déjà installés, captures de plus de 30 jours), un seul bouton de confirmation. |
 | Fichiers volumineux | Filtres par type (photos, vidéos, audio, documents, APK, archives, autres) et par taille minimale (10, 50, 100 Mo). |
 | Doublons | Contenu strictement identique ; un exemplaire conservé. |

@@ -1,6 +1,7 @@
 package app.nettoyage;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
 import android.app.usage.StorageStatsManager;
@@ -12,6 +13,7 @@ import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -23,6 +25,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.media.MediaScannerConnection;
 import android.media.ThumbnailUtils;
 import android.net.Uri;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -30,6 +33,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 import android.os.StatFs;
+import android.os.SystemClock;
 import android.os.storage.StorageManager;
 import android.provider.MediaStore;
 import android.provider.Settings;
@@ -92,7 +96,7 @@ public class MainActivity extends Activity {
     int largeCat = -1;
     long largeMin = Scan.LARGE;
     String pickPath, foldPath;
-    boolean pendingScan;
+    boolean pendingScan, optAfterScan;
     final Runnable pickRun = this::picker;
     final Runnable foldRun = this::folders;
     boolean locked, scanning, working, needRefresh;
@@ -528,6 +532,13 @@ public class MainActivity extends Activity {
         c.addView(tv(Tr.f("free", Tr.size(free)), 14, GRN, true));
         b.addView(c, lpw(0));
 
+        long upDays = SystemClock.elapsedRealtime() / 86400000L;
+        if (upDays >= 7) {
+            LinearLayout rb = card();
+            rb.addView(tv("🔄 " + Tr.f("reboot_banner", (int) upDays), 13, ACC, false));
+            b.addView(rb, lpw(10));
+        }
+
         // Autorisation
         if (!hasAccess()) {
             LinearLayout p = card();
@@ -568,6 +579,7 @@ public class MainActivity extends Activity {
 
         // Fonctions
         boolean sc = scan.scanned;
+        menu(b, "🚀", "f_opt", Tr.t("s_opt"), () -> nav(this::optimizer));
         menu(b, "📏", "f_large", sc ? Tr.f("sub_items", scan.large.size(), Tr.size(Scan.sum(scan.large))) : Tr.t("s_large"),
                 () -> needScan(() -> nav(this::largeScreen)));
         menu(b, "👯", "f_dups", scan.dupG.ready ? Tr.f("dups_sub", scan.dupG.groups.size(), Tr.size(scan.dupG.freeable())) : Tr.t("s_dups"),
@@ -673,6 +685,10 @@ public class MainActivity extends Activity {
                 back.clear();
                 cur = this::home;
                 home();
+                if (optAfterScan) {
+                    optAfterScan = false;
+                    if (scan.scanned) quickClean();
+                }
             });
         });
     }
@@ -1807,6 +1823,276 @@ public class MainActivity extends Activity {
             }
         });
         return row;
+    }
+
+    // =====================================================================
+    // Optimiseur
+    // =====================================================================
+
+    void openSetting(String action) {
+        try {
+            startActivity(new Intent(action));
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_SETTINGS));
+            } catch (Exception e2) {
+                toast(Tr.t("setting_fail"));
+            }
+        }
+    }
+
+    void metric(LinearLayout parent, String label, String value) {
+        LinearLayout r = hbox();
+        r.setPadding(0, dp(4), 0, dp(4));
+        r.addView(tv(label, 14, SUB, false), new LinearLayout.LayoutParams(0, -2, 1f));
+        r.addView(tv(value, 14, TXT, true));
+        parent.addView(r);
+    }
+
+    void optimizer() {
+        LinearLayout page = scaffold(Tr.t("f_opt"), true, null);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout b = vbox();
+        b.setPadding(dp(14), dp(12), dp(14), dp(24));
+        sv.addView(b);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        StatFs sf = new StatFs(Environment.getExternalStorageDirectory().getPath());
+        long total = sf.getTotalBytes();
+        long free = sf.getAvailableBytes();
+        int freePct = (int) (free * 100 / Math.max(total, 1));
+
+        ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+        ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(mi);
+
+        int level = -1, temp = -1, health = BatteryManager.BATTERY_HEALTH_GOOD;
+        Intent bi = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (bi != null) {
+            int lv = bi.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+            int sc = bi.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
+            level = lv < 0 ? -1 : lv * 100 / Math.max(sc, 1);
+            int tr = bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
+            temp = tr < 0 ? -1 : tr / 10;
+            health = bi.getIntExtra(BatteryManager.EXTRA_HEALTH, BatteryManager.BATTERY_HEALTH_GOOD);
+        }
+        long up = SystemClock.elapsedRealtime();
+        int days = (int) (up / 86400000L);
+
+        int score = 100;
+        ArrayList<String> adv = new ArrayList<>();
+        if (freePct < 10) {
+            score -= 35;
+            adv.add(Tr.t("adv_storage"));
+        } else if (freePct < 20) {
+            score -= 20;
+            adv.add(Tr.t("adv_storage"));
+        } else if (freePct < 30) {
+            score -= 8;
+        }
+        if (mi.lowMemory) {
+            score -= 15;
+            adv.add(Tr.t("adv_ram"));
+        }
+        if (days >= 14) {
+            score -= 15;
+            adv.add(Tr.f("adv_up", days));
+        } else if (days >= 7) {
+            score -= 8;
+            adv.add(Tr.f("adv_up", days));
+        }
+        if (temp >= 40) {
+            score -= 15;
+            adv.add(Tr.f("adv_temp", temp));
+        } else if (temp >= 37) {
+            score -= 5;
+        }
+        if (health != BatteryManager.BATTERY_HEALTH_GOOD && health != BatteryManager.BATTERY_HEALTH_UNKNOWN) {
+            score -= 10;
+            adv.add(Tr.t("adv_health"));
+        }
+        score = Math.max(0, score);
+        if (adv.isEmpty()) adv.add(Tr.t("adv_ok"));
+        int sc = score >= 80 ? GRN : (score >= 60 ? ACC : RED);
+
+        LinearLayout c = card();
+        c.addView(tv(Tr.t("opt_score"), 13, SUB, false));
+        c.addView(tv(score + " / 100 · " + Tr.t(score >= 80 ? "score_good" : (score >= 60 ? "score_mid" : "score_low")), 24, sc, true));
+        c.addView(bar(new long[]{score, 100 - score}, new int[]{sc, CARD2}), barLp());
+        b.addView(c, lpw(0));
+
+        LinearLayout m = card();
+        metric(m, Tr.t("m_storage"), freePct + " % · " + Tr.size(free));
+        metric(m, Tr.t("m_ram"), Tr.size(mi.availMem) + " / " + Tr.size(mi.totalMem));
+        metric(m, Tr.t("m_batt"), (level >= 0 ? level + " %" : "—") + (temp >= 0 ? " · " + temp + " °C" : ""));
+        metric(m, Tr.t("m_up"), Tr.f("up_fmt", days, (int) ((up / 3600000L) % 24)));
+        b.addView(m, lpw(10));
+
+        LinearLayout a = card();
+        a.addView(tv(Tr.t("opt_adv"), 15, TXT, true));
+        for (String x : adv) {
+            TextView t = tv("• " + x, 13, SUB, false);
+            t.setPadding(0, dp(4), 0, 0);
+            a.addView(t);
+        }
+        b.addView(a, lpw(10));
+
+        b.addView(btn(Tr.t("opt_all"), ACC, BG, v -> optimizeAll()), lpw(12));
+        menu(b, "🔥", "f_hungry", Tr.t("s_hungry"), () -> nav(this::hungry));
+        menu(b, "🛠️", "f_tips", Tr.t("s_tips"), () -> nav(this::tips));
+    }
+
+    /** Vide le cache de l'application puis lance le nettoyage rapide (après analyse si besoin). */
+    void optimizeAll() {
+        if (!hasAccess()) {
+            askAccess();
+            return;
+        }
+        long fr = Scan.deleteContents(getCacheDir()) + Scan.deleteContents(getExternalCacheDir());
+        if (fr > 0) trash.log("f_cache", 1, fr, "D");
+        toast(Tr.f("opt_cache", Tr.size(fr)));
+        if (scan.scanned) {
+            quickClean();
+        } else {
+            optAfterScan = true;
+            startScan();
+        }
+    }
+
+    // ---- Applications gourmandes ----
+
+    static class TimeRow {
+        String label, pkg;
+        long ms;
+        Drawable icon;
+    }
+
+    ArrayList<TimeRow> loadHungry() {
+        ArrayList<TimeRow> rows = new ArrayList<>();
+        PackageManager pm = getPackageManager();
+        long now = System.currentTimeMillis();
+        try {
+            UsageStatsManager u = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            Map<String, UsageStats> m = u.queryAndAggregateUsageStats(now - 7L * 86400000L, now);
+            for (Map.Entry<String, UsageStats> e : m.entrySet()) {
+                long t = e.getValue().getTotalTimeInForeground();
+                String pkg = e.getKey();
+                if (t < 60000 || pkg.equals(getPackageName())) continue;
+                if (pm.getLaunchIntentForPackage(pkg) == null) continue;
+                try {
+                    ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                    TimeRow r = new TimeRow();
+                    r.pkg = pkg;
+                    r.ms = t;
+                    r.label = String.valueOf(pm.getApplicationLabel(ai));
+                    r.icon = pm.getApplicationIcon(ai);
+                    rows.add(r);
+                } catch (Exception ex) {
+                    // application disparue : ignorée
+                }
+            }
+        } catch (Exception e) {
+            // statistiques indisponibles
+        }
+        Collections.sort(rows, (x, y) -> Long.compare(y.ms, x.ms));
+        return rows;
+    }
+
+    void hungry() {
+        LinearLayout page = scaffold(Tr.t("f_hungry"), true, null);
+        if (!usageGranted()) {
+            page.addView(note(Tr.t("usage_need")));
+            Button g = btn(Tr.t("grant"), ACC, BG, v -> {
+                needRefresh = true;
+                try {
+                    startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
+                } catch (Exception e) {
+                    toast(Tr.t("setting_fail"));
+                }
+            });
+            LinearLayout.LayoutParams lp = lpw(10);
+            lp.leftMargin = dp(14);
+            lp.rightMargin = dp(14);
+            page.addView(g, lp);
+            return;
+        }
+        page.addView(note(Tr.t("hungry_hint")));
+        final TextView load = tv(Tr.t("apps_loading"), 14, SUB, false);
+        load.setPadding(dp(14), dp(6), dp(14), dp(6));
+        page.addView(load);
+        ScrollView sv = new ScrollView(this);
+        final LinearLayout list = vbox();
+        list.setPadding(dp(14), dp(4), dp(14), dp(20));
+        sv.addView(list);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        bg.execute(() -> {
+            final ArrayList<TimeRow> rows = loadHungry();
+            ui.post(() -> {
+                load.setText(rows.isEmpty() ? Tr.t("hungry_none") : "");
+                if (!rows.isEmpty()) load.setVisibility(View.GONE);
+                for (TimeRow r : rows) list.addView(timeView(r), lpw(8));
+            });
+        });
+    }
+
+    View timeView(final TimeRow r) {
+        LinearLayout row = hbox();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setBackground(rr(CARD, 14));
+        ImageView ic = new ImageView(this);
+        ic.setImageDrawable(r.icon);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(40), dp(40));
+        ip.setMarginEnd(dp(12));
+        row.addView(ic, ip);
+        TextView n = tv(r.label, 15, TXT, true);
+        n.setSingleLine(true);
+        n.setEllipsize(TextUtils.TruncateAt.END);
+        row.addView(n, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView sz = tv(Tr.dur(r.ms), 14, ACC, true);
+        sz.setPaddingRelative(dp(8), 0, 0, 0);
+        row.addView(sz);
+        row.setOnClickListener(v -> {
+            needRefresh = true;
+            try {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + r.pkg)));
+            } catch (Exception e) {
+                toast(Tr.t("setting_fail"));
+            }
+        });
+        return row;
+    }
+
+    // ---- Conseils et raccourcis ----
+
+    void tipCard(LinearLayout parent, String titleKey, String descKey, String[][] buttons) {
+        LinearLayout c = card();
+        c.addView(tv(Tr.t(titleKey), 16, TXT, true));
+        TextView d = tv(Tr.t(descKey), 13, SUB, false);
+        d.setPadding(0, dp(4), 0, dp(4));
+        c.addView(d);
+        for (final String[] bt : buttons) {
+            c.addView(btn(Tr.t(bt[0]), CARD2, TXT, v -> openSetting(bt[1])), lpw(8));
+        }
+        parent.addView(c, lpw(10));
+    }
+
+    void tips() {
+        LinearLayout page = scaffold(Tr.t("f_tips"), true, null);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout b = vbox();
+        b.setPadding(dp(14), dp(4), dp(14), dp(24));
+        sv.addView(b);
+        page.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        tipCard(b, "tips_batt", "tips_batt_d", new String[][]{
+                {"b_opt", "android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS"},
+                {"b_saver", "android.settings.BATTERY_SAVER_SETTINGS"},
+                {"b_display", "android.settings.DISPLAY_SETTINGS"}});
+        tipCard(b, "tips_smooth", "tips_smooth_d", new String[][]{
+                {"b_about", "android.settings.DEVICE_INFO_SETTINGS"},
+                {"b_dev", "android.settings.APPLICATION_DEVELOPMENT_SETTINGS"}});
+        tipCard(b, "tips_data", "tips_data_d", new String[][]{
+                {"b_data", "android.settings.DATA_USAGE_SETTINGS"}});
     }
 
     // =====================================================================
